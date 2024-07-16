@@ -3,7 +3,7 @@ import numpy as np
 import random
 from datetime import datetime
 
-def getTickerPrice(ticker: str, date: pd.Timestamp) -> float:
+def getTickerPrice(ticker: str, date: pd.Timestamp) -> float: #random function to simulate a get price function
     random.seed(0)
     return random.uniform(300, 400)
 
@@ -23,7 +23,7 @@ def calculate_trade_performance(trades, market_data, risk_free_rate=0.01):
     trades['Long_Short'] = trades['Side'].apply(lambda x: 1 if x == 'buy' else -1)
     trades['Trade_Value'] = trades['Size'] * trades['Price']
 
-    # Sort trades by date
+
     trades = trades.sort_values(by='Date').reset_index(drop=True)
     all_dates = trades['Date'].unique()
     print(trades)
@@ -36,7 +36,7 @@ def calculate_trade_performance(trades, market_data, risk_free_rate=0.01):
         current_trades = trades[trades['Date'] == current_date]
         print('Current Trades\n', current_trades)
         for _, row in current_trades.iterrows():
-            if row['Long_Short'] == 1:  # Buy
+            if row['Long_Short'] == 1:  #Buys
                 remaining_size = row['Size']
                 while remaining_size > 0 and open_short_positions:
                     short_size, short_price = open_short_positions.pop(0)
@@ -51,7 +51,7 @@ def calculate_trade_performance(trades, market_data, risk_free_rate=0.01):
                         remaining_size = 0
                 if remaining_size > 0:
                     open_long_positions.append((remaining_size, row['Price']))
-            else:  # Sell
+            else:  #Sells
                 remaining_size = row['Size']
                 while remaining_size > 0 and open_long_positions:
                     long_size, long_price = open_long_positions.pop(0)
@@ -67,7 +67,7 @@ def calculate_trade_performance(trades, market_data, risk_free_rate=0.01):
                 if remaining_size > 0:
                     open_short_positions.append((remaining_size, row['Price']))
 
-        # Calculate the portfolio value for the current date
+        #Calculating portfolio value by date
             portfolio_value = sum((getTickerPrice(row['Symbol'], current_date) - price) * size for size, price in open_long_positions) + \
                           sum((price - getTickerPrice(row['Symbol'], current_date)) * size for size, price in open_short_positions) + \
                           sum(closed_profits)
@@ -90,7 +90,7 @@ def calculate_trade_performance(trades, market_data, risk_free_rate=0.01):
     gross_loss = sum([p for p in closed_profits if p < 0])
     net_profit = gross_profit + gross_loss
 
-    # Calculate returns and other metrics
+    #Calculate returns and other metrics
     portfolio_returns = daily_portfolio_series.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
     z_scores = (portfolio_returns - portfolio_returns.mean()) / portfolio_returns.std()
     portfolio_returns = portfolio_returns[(z_scores > -3) & (z_scores < 3)]
@@ -118,7 +118,7 @@ def calculate_trade_performance(trades, market_data, risk_free_rate=0.01):
 
     return portfolio_metrics
 
-# Example market data
+
 market_data = pd.DataFrame({
     'Date': pd.to_datetime(['2024-07-01', '2024-07-02', '2024-07-03', '2024-07-04', '2024-07-05']),
     'Return': [0.01, 0.02, -0.01, 0.03, 0.02]
