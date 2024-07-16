@@ -4,6 +4,7 @@ import random
 from datetime import datetime
 
 def getTickerPrice(ticker: str, date: pd.Timestamp) -> float:
+    random.seed(0)
     return random.uniform(300, 400)
 
 def calculate_max_drawdown(cumulative_values):
@@ -22,25 +23,19 @@ def calculate_trade_performance(trades, market_data, risk_free_rate=0.01):
     trades['Long_Short'] = trades['Side'].apply(lambda x: 1 if x == 'buy' else -1)
     trades['Trade_Value'] = trades['Size'] * trades['Price']
 
-    grouped = trades.groupby('Symbol')
-    metrics = []
-
-    portfolio_values = []
-    cumulative_value = 0
+    # Sort trades by date
+    trades = trades.sort_values(by='Date').reset_index(drop=True)
+    all_dates = trades['Date'].unique()
+    print(trades)
     open_long_positions = []
     open_short_positions = []
     closed_profits = []
+    daily_portfolio_values = {}
 
-    for symbol, group in grouped:
-        group = group.sort_values(by='Date')
-        group['Cumulative_Size'] = group['Size'].cumsum()
-
-        symbol_portfolio_values = []
-
-        for index, row in group.iterrows():
-            current_price = getTickerPrice(symbol, row['Date'])
-            print(f"CURRENT PRICE for {symbol} on {row['Date']}: {current_price}")
-
+    for current_date in all_dates:
+        current_trades = trades[trades['Date'] == current_date]
+        print('Current Trades\n', current_trades)
+        for _, row in current_trades.iterrows():
             if row['Long_Short'] == 1:  # Buy
                 remaining_size = row['Size']
                 while remaining_size > 0 and open_short_positions:
@@ -72,30 +67,38 @@ def calculate_trade_performance(trades, market_data, risk_free_rate=0.01):
                 if remaining_size > 0:
                     open_short_positions.append((remaining_size, row['Price']))
 
-            symbol_portfolio_values.append(sum(closed_profits))
-            cumulative_value = sum(closed_profits)
+        # Calculate the portfolio value for the current date
+            portfolio_value = sum((getTickerPrice(row['Symbol'], current_date) - price) * size for size, price in open_long_positions) + \
+                          sum((price - getTickerPrice(row['Symbol'], current_date)) * size for size, price in open_short_positions) + \
+                          sum(closed_profits)
+            print("CURRENTPORTFOLIO VALUE\n",sum((getTickerPrice(row['Symbol'], current_date) - price) * size for size, price in open_long_positions))
+            print(sum((price - getTickerPrice(row['Symbol'], current_date)) * size for size, price in open_short_positions))
+            print(sum(closed_profits))
+            print(sum((getTickerPrice(row['Symbol'], current_date) - price) * size for size, price in open_long_positions) + \
+                          sum((price - getTickerPrice(row['Symbol'], current_date)) * size for size, price in open_short_positions) + \
+                          sum(closed_profits))
+            print(current_date, "and", portfolio_value)
+            print("OPEN LONG POSITIONS", open_long_positions)
+            print("OPEN SHORT POSITIONS", open_short_positions)
+            print("CLOSED PROFITS", closed_profits)
+            print(row['Symbol'],(getTickerPrice(row['Symbol'], current_date)))
+        daily_portfolio_values[current_date] = portfolio_value
 
-        portfolio_values.extend(symbol_portfolio_values)
-
-    cumulative_values = pd.Series(portfolio_values[1:])
-    print("CUMULATIVEVALS", cumulative_values)
+    daily_portfolio_series = pd.Series(daily_portfolio_values).sort_index()
 
     gross_profit = sum([p for p in closed_profits if p > 0])
     gross_loss = sum([p for p in closed_profits if p < 0])
     net_profit = gross_profit + gross_loss
 
-    # Valuing open positions at the last available market price
-    last_date = trades['Date'].max()
-    final_prices = {symbol: getTickerPrice(symbol, last_date) for symbol in trades['Symbol'].unique()}
-    open_position_value = sum((final_prices[symbol] - price) * size for size, price in open_long_positions) + \
-                          sum((price - final_prices[symbol]) * size for size, price in open_short_positions)
-
-    avg_trade_return = cumulative_values.pct_change().replace([np.inf, -np.inf], np.nan).dropna().mean()
+    # Calculate returns and other metrics
+    portfolio_returns = daily_portfolio_series.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+    z_scores = (portfolio_returns - portfolio_returns.mean()) / portfolio_returns.std()
+    portfolio_returns = portfolio_returns[(z_scores > -3) & (z_scores < 3)]
+    avg_trade_return = portfolio_returns.mean()
     avg_trade_volume = trades['Size'].mean()
-    max_drawdown = calculate_max_drawdown(cumulative_values)
-    win_rate = len([p for p in closed_profits if p > 0]) / len(closed_profits) if len(closed_profits) > 0 else 0
-
-    sharpe_ratio = calculate_sharpe_ratio(cumulative_values.pct_change().replace([np.inf, -np.inf], np.nan).dropna(), risk_free_rate)
+    max_drawdown = calculate_max_drawdown(daily_portfolio_series)
+    win_rate = len(portfolio_returns[portfolio_returns > 0]) / len(portfolio_returns) if len(portfolio_returns) > 0 else 0
+    sharpe_ratio = calculate_sharpe_ratio(portfolio_returns, risk_free_rate)
     romad = net_profit / max_drawdown if max_drawdown != 0 else np.nan
 
     portfolio_metrics = {
@@ -108,91 +111,29 @@ def calculate_trade_performance(trades, market_data, risk_free_rate=0.01):
         'Avg Trade Volume': avg_trade_volume,
         'Max Drawdown': max_drawdown,
         'Win Rate': win_rate,
-        'Cumulative Return': cumulative_value + open_position_value,
-        'Open Position Value': open_position_value,
+        'Cumulative Return': daily_portfolio_series.iloc[-1],
         'Sharpe Ratio': sharpe_ratio,
         'ROMAD': romad
     }
 
     return portfolio_metrics
 
+# Example market data
 market_data = pd.DataFrame({
     'Date': pd.to_datetime(['2024-07-01', '2024-07-02', '2024-07-03', '2024-07-04', '2024-07-05']),
     'Return': [0.01, 0.02, -0.01, 0.03, 0.02]
 })
 
+# Example trades data
 data = {
-    'Date': pd.to_datetime([
-        '2024-07-01', '2024-07-02', '2024-07-03', '2024-07-04', '2024-07-05',
-        '2024-07-06', '2024-07-07', '2024-07-08', '2024-07-09', '2024-07-10',
-        '2024-07-11', '2024-07-12', '2024-07-13', '2024-07-14', '2024-07-15',
-        '2024-07-16', '2024-07-17', '2024-07-18', '2024-07-19', '2024-07-20',
-        '2024-07-21', '2024-07-22', '2024-07-23', '2024-07-24', '2024-07-25',
-        '2024-07-26', '2024-07-27', '2024-07-28', '2024-07-29', '2024-07-30',
-        '2024-08-01', '2024-08-02', '2024-08-03', '2024-08-04', '2024-08-05',
-        '2024-08-06', '2024-08-07', '2024-08-08', '2024-08-09', '2024-08-10',
-        '2024-08-11', '2024-08-12', '2024-08-13', '2024-08-14', '2024-08-15',
-        '2024-08-16', '2024-08-17', '2024-08-18', '2024-08-19', '2024-08-20',
-        '2024-08-21', '2024-08-22', '2024-08-23', '2024-08-24', '2024-08-25',
-        '2024-08-26', '2024-08-27', '2024-08-28', '2024-08-29', '2024-08-30',
-        '2024-09-01', '2024-09-02', '2024-09-03', '2024-09-04', '2024-09-05',
-        '2024-09-06', '2024-09-07', '2024-09-08', '2024-09-09', '2024-09-10',
-        '2024-09-11', '2024-09-12', '2024-09-13', '2024-09-14', '2024-09-15',
-        '2024-09-16', '2024-09-17', '2024-09-18', '2024-09-19', '2024-09-20',
-        '2024-09-21', '2024-09-22', '2024-09-23', '2024-09-24', '2024-09-25',
-        '2024-09-26', '2024-09-27', '2024-09-28', '2024-09-29', '2024-09-30',
-        '2024-10-01', '2024-10-02', '2024-10-03', '2024-10-04', '2024-10-05',
-        '2024-10-06', '2024-10-07', '2024-10-08', '2024-10-09', '2024-10-10'
-    ]),
-    'Symbol': [
-        'AAPL', 'AAPL', 'AAPL', 'GOOGL', 'GOOGL', 'MSFT', 'MSFT', 'MSFT',
-        'TSLA', 'TSLA', 'AMZN', 'AMZN', 'NFLX', 'NFLX', 'FB', 'FB', 'AAPL',
-        'GOOGL', 'MSFT', 'TSLA', 'AMZN', 'NFLX', 'FB', 'AAPL', 'GOOGL',
-        'MSFT', 'TSLA', 'AMZN', 'NFLX', 'FB', 'AAPL', 'AAPL', 'GOOGL',
-        'GOOGL', 'MSFT', 'MSFT', 'TSLA', 'TSLA', 'AMZN', 'AMZN', 'NFLX',
-        'NFLX', 'FB', 'FB', 'AAPL', 'GOOGL', 'MSFT', 'TSLA', 'AMZN', 'NFLX',
-        'FB', 'AAPL', 'GOOGL', 'MSFT', 'TSLA', 'AMZN', 'NFLX', 'FB', 'AAPL',
-        'GOOGL', 'MSFT', 'TSLA', 'AMZN', 'NFLX', 'FB', 'AAPL', 'GOOGL',
-        'MSFT', 'TSLA', 'AMZN', 'NFLX', 'FB', 'AAPL', 'GOOGL', 'MSFT', 'TSLA',
-        'AMZN', 'NFLX', 'FB', 'AAPL', 'GOOGL', 'MSFT', 'TSLA', 'AMZN', 'NFLX',
-        'FB', 'AAPL', 'GOOGL', 'MSFT', 'TSLA', 'AMZN', 'NFLX', 'FB', 'AAPL',
-        'GOOGL', 'MSFT', 'TSLA', 'AMZN', 'TSLA', 'TSLA'
-    ],
-    'Side': [
-        'buy', 'sell', 'buy', 'buy', 'sell', 'buy', 'sell', 'buy',
-        'buy', 'sell', 'buy', 'sell', 'buy', 'sell', 'buy', 'sell', 'buy',
-        'sell', 'buy', 'sell', 'buy', 'sell', 'buy', 'sell', 'buy',
-        'sell', 'buy', 'sell', 'buy', 'sell', 'buy', 'buy', 'sell',
-        'sell', 'buy', 'sell', 'buy', 'sell', 'buy', 'sell', 'buy',
-        'sell', 'buy', 'sell', 'buy', 'sell', 'buy', 'sell', 'buy',
-        'sell', 'buy', 'sell', 'buy', 'sell', 'buy', 'sell', 'buy',
-        'sell', 'buy', 'sell', 'buy', 'sell', 'buy', 'sell', 'buy',
-        'sell', 'buy', 'sell', 'buy', 'sell', 'buy', 'sell', 'buy',
-        'sell', 'buy', 'sell', 'buy', 'sell', 'buy', 'sell', 'buy',
-        'sell', 'buy', 'sell', 'buy', 'sell', 'buy', 'sell', 'buy',
-        'sell', 'buy', 'sell', 'buy', 'sell', 'buy', 'sell', 'buy',
-        'sell', 'buy', 'sell'
-    ],
-    'Size': [
-        10, 10, None, 5, None, 15, None, 20, 8, None, 25, None, 12, None, 18, None,
-        15, None, 10, None, 8, None, 12, None, 20, None, 25, None, 18, None,
-        10, 10, None, 5, None, 15, None, 20, 8, None, 25, None, 12, None, 18, None,
-        15, None, 10, None, 8, None, 12, None, 20, None, 25, None, 18, None,
-        10, 10, None, 5, None, 15, None, 20, 8, None, 25, None, 12, None, 18, None,
-        15, None, 10, None, 8, None, 12, None, 20, None, 25, None, 18, None,
-        10, 10, None, 5, None, 15, None, 20, 8, None
-    ],
-    'Price': [
-    150, 155, 160, 1200, 1190, 300, 310, 315, 600, 590, 3500, 3400, 500, 490,
-    200, 190, 165, 1185, 295, 585, 3450, 485, 205, 170, 1195, 305, 575, 3500,
-    480, 210, 150, 155, 160, 1200, 1190, 300, 310, 315, 600, 590, 3500, 3400,
-    500, 490, 200, 190, 165, 1185, 295, 585, 3450, 485, 205, 170, 1195, 305,
-    575, 3500, 480, 210, 150, 155, 160, 1200, 1190, 300, 310, 315, 600, 590,
-    3500, 3400, 500, 490, 200, 190, 165, 1185, 295, 585, 3450, 485, 205, 170,
-    1195, 305, 575, 3500, 480, 210, 150, 155, 160, 1200, 1190, 300, 310, 315,
-    600, 590
-]}
+    'Date': pd.to_datetime(['2024-07-01', '2024-07-02', '2024-07-03', '2024-07-04', '2024-07-05']),
+    'Symbol': ['AAPL', 'AAPL', 'AAPL', 'GOOGL', 'GOOGL'],
+    'Side': ['buy', 'sell', 'buy', 'buy', 'sell'],
+    'Size': [10, 10, 1, 5, 1],
+    'Price': [150, 155, 160, 1200, 1190]
+}
+
 trades_df = pd.DataFrame(data)
 
-metrics_df = calculate_trade_performance(trades_df, market_data)
-print(metrics_df)
+portfolio_metrics = calculate_trade_performance(trades_df, market_data)
+print(portfolio_metrics)
